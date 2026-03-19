@@ -5,6 +5,7 @@
 
 use netstack::socket::tcp_socket::TcpSocket;
 use netstack::socket::tcp::state::TcpState;
+use netstack::time::Instant;
 
 fn main() {
     println!("╔══════════════════════════════════════════════════════════╗");
@@ -12,24 +13,27 @@ fn main() {
     println!("╚══════════════════════════════════════════════════════════╝");
     println!();
 
+    let t = Instant::from_millis(0);
+
     // ── Establish connection ───────────────────────────────────────
     println!("─── Connecting to 10.0.0.2:80 ──────────────────────────");
     let (mut client, syn_bytes) = TcpSocket::tcp_connect(
         [10, 0, 0, 1], 50000,
         [10, 0, 0, 2], 80,
         1000,
+        t,
     )
     .expect("connect failed");
 
     let mut server = TcpSocket::tcp_listen([10, 0, 0, 2], 80).expect("listen failed");
     let syn_ack = server
-        .accept(&syn_bytes, [10, 0, 0, 1], 50000, 2000)
+        .accept(&syn_bytes, [10, 0, 0, 1], 50000, 2000, t)
         .expect("accept failed");
     let ack = client
-        .on_segment(&syn_ack)
+        .on_segment(&syn_ack, t)
         .expect("failed")
         .expect("expected ACK");
-    server.on_segment(&ack).expect("failed");
+    server.on_segment(&ack, t).expect("failed");
 
     assert_eq!(client.state(), TcpState::Established);
     println!("  Connected!");
@@ -45,7 +49,7 @@ fn main() {
                     \r\n";
 
     let data_seg = client
-        .tcp_send(request)
+        .tcp_send(request, t)
         .expect("send failed")
         .expect("segment");
     println!("  [CLIENT →]");
@@ -55,9 +59,9 @@ fn main() {
     println!();
 
     // Server receives the request
-    let s_ack = server.on_segment(&data_seg).expect("failed");
+    let s_ack = server.on_segment(&data_seg, t).expect("failed");
     if let Some(a) = s_ack {
-        client.on_segment(&a).expect("failed");
+        client.on_segment(&a, t).expect("failed");
     }
     let mut req_buf = [0u8; 1024];
     let n = server.tcp_receive(&mut req_buf).expect("recv failed");
@@ -80,13 +84,13 @@ fn main() {
     );
 
     let resp_seg = server
-        .tcp_send(response.as_bytes())
+        .tcp_send(response.as_bytes(), t)
         .expect("send failed")
         .expect("segment");
 
-    let c_ack = client.on_segment(&resp_seg).expect("failed");
+    let c_ack = client.on_segment(&resp_seg, t).expect("failed");
     if let Some(a) = c_ack {
-        server.on_segment(&a).expect("failed");
+        server.on_segment(&a, t).expect("failed");
     }
 
     let mut resp_buf = [0u8; 2048];
@@ -100,12 +104,12 @@ fn main() {
 
     // ── Close ──────────────────────────────────────────────────────
     println!("─── Closing Connection ───────────────────────────────────");
-    let fin = client.close().expect("close failed");
-    let ack_fin = server.on_segment(&fin).expect("failed").expect("ack");
-    client.on_segment(&ack_fin).expect("failed");
-    let srv_fin = server.close().expect("close failed");
-    let fack = client.on_segment(&srv_fin).expect("failed").expect("ack");
-    server.on_segment(&fack).expect("failed");
+    let fin = client.close(t).expect("close failed");
+    let ack_fin = server.on_segment(&fin, t).expect("failed").expect("ack");
+    client.on_segment(&ack_fin, t).expect("failed");
+    let srv_fin = server.close(t).expect("close failed");
+    let fack = client.on_segment(&srv_fin, t).expect("failed").expect("ack");
+    server.on_segment(&fack, t).expect("failed");
     println!("  Connection closed.");
     println!();
     println!("  ✓ HTTP client example complete.");

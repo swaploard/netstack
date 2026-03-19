@@ -7,6 +7,7 @@
 
 use netstack::socket::tcp_socket::TcpSocket;
 use netstack::socket::tcp::state::TcpState;
+use netstack::time::Instant;
 use std::time;
 
 const TOTAL_BYTES: usize = 1024 * 1024; // 1 MiB
@@ -18,11 +19,14 @@ fn main() {
     println!("╚══════════════════════════════════════════════════════════╝");
     println!();
 
+    let t = Instant::from_millis(0);
+
     // ── Set up connection ──────────────────────────────────────────
     let (mut client, syn_bytes) = TcpSocket::tcp_connect(
         [10, 0, 0, 1], 50000,
         [10, 0, 0, 2], 80,
         1000,
+        t,
     )
     .expect("client connect failed");
 
@@ -30,16 +34,16 @@ fn main() {
         .expect("server listen failed");
 
     let syn_ack_bytes = server
-        .accept(&syn_bytes, [10, 0, 0, 1], 50000, 2000)
+        .accept(&syn_bytes, [10, 0, 0, 1], 50000, 2000, t)
         .expect("server accept failed");
 
     let ack_bytes = client
-        .on_segment(&syn_ack_bytes)
+        .on_segment(&syn_ack_bytes, t)
         .expect("client SYN-ACK processing failed")
         .expect("expected ACK segment");
 
     server
-        .on_segment(&ack_bytes)
+        .on_segment(&ack_bytes, t)
         .expect("server ACK processing failed");
 
     assert_eq!(client.state(), TcpState::Established);
@@ -57,17 +61,17 @@ fn main() {
 
     while bytes_sent < TOTAL_BYTES {
         let data_seg = client
-            .tcp_send(&payload)
+            .tcp_send(&payload, t)
             .expect("client send failed")
             .expect("expected data segment");
 
         let ack_response = server
-            .on_segment(&data_seg)
+            .on_segment(&data_seg, t)
             .expect("server data processing failed");
 
         if let Some(ack) = ack_response {
             client
-                .on_segment(&ack)
+                .on_segment(&ack, t)
                 .expect("client ACK processing failed");
         }
 
@@ -90,21 +94,21 @@ fn main() {
     println!();
 
     // ── Teardown ───────────────────────────────────────────────────
-    let fin_bytes = client.close().expect("client close failed");
+    let fin_bytes = client.close(t).expect("client close failed");
     let ack_for_fin = server
-        .on_segment(&fin_bytes)
+        .on_segment(&fin_bytes, t)
         .expect("server FIN processing failed")
         .expect("expected ACK for FIN");
     client
-        .on_segment(&ack_for_fin)
+        .on_segment(&ack_for_fin, t)
         .expect("client ACK processing failed");
-    let server_fin = server.close().expect("server close failed");
+    let server_fin = server.close(t).expect("server close failed");
     let final_ack = client
-        .on_segment(&server_fin)
+        .on_segment(&server_fin, t)
         .expect("client server-FIN processing failed")
         .expect("expected final ACK");
     server
-        .on_segment(&final_ack)
+        .on_segment(&final_ack, t)
         .expect("server final ACK processing failed");
 
     println!("  Connection closed cleanly.");

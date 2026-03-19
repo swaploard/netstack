@@ -5,12 +5,15 @@
 
 use netstack::socket::tcp_socket::TcpSocket;
 use netstack::socket::tcp::state::TcpState;
+use netstack::time::Instant;
 
 fn main() {
     println!("╔══════════════════════════════════════════════════════════╗");
     println!("║          netstack — TCP Server Example                  ║");
     println!("╚══════════════════════════════════════════════════════════╝");
     println!();
+
+    let t = Instant::from_millis(0);
 
     // ── Listen for connections ─────────────────────────────────────
     println!("─── Listening on 10.0.0.2:80 ───────────────────────────");
@@ -23,6 +26,7 @@ fn main() {
         [10, 0, 0, 1], 50000,
         [10, 0, 0, 2], 80,
         1000,
+        t,
     )
     .expect("client connect failed");
 
@@ -30,15 +34,15 @@ fn main() {
     println!();
     println!("─── Accepting Connection ───────────────────────────────");
     let syn_ack_bytes = server
-        .accept(&syn_bytes, [10, 0, 0, 1], 50000, 2000)
+        .accept(&syn_bytes, [10, 0, 0, 1], 50000, 2000, t)
         .expect("accept failed");
     println!("  [SERVER] SYN-ACK sent     | state: {}", server.state());
 
     let ack_bytes = client
-        .on_segment(&syn_ack_bytes)
+        .on_segment(&syn_ack_bytes, t)
         .expect("client SYN-ACK failed")
         .expect("expected ACK");
-    server.on_segment(&ack_bytes).expect("server ACK failed");
+    server.on_segment(&ack_bytes, t).expect("server ACK failed");
     println!("  [SERVER] Connection open  | state: {}", server.state());
     assert_eq!(server.state(), TcpState::Established);
     println!();
@@ -47,13 +51,13 @@ fn main() {
     println!("─── Receiving Data ───────────────────────────────────────");
     let message = b"Hello, server!";
     let data_seg = client
-        .tcp_send(message)
+        .tcp_send(message, t)
         .expect("client send failed")
         .expect("expected segment");
 
-    let ack = server.on_segment(&data_seg).expect("server data failed");
+    let ack = server.on_segment(&data_seg, t).expect("server data failed");
     if let Some(a) = ack {
-        client.on_segment(&a).expect("client ack failed");
+        client.on_segment(&a, t).expect("client ack failed");
     }
 
     let mut recv_buf = [0u8; 256];
@@ -69,16 +73,16 @@ fn main() {
     println!("─── Sending Reply ────────────────────────────────────────");
     let reply = b"Hello, client!";
     let reply_seg = server
-        .tcp_send(reply)
+        .tcp_send(reply, t)
         .expect("server send failed")
         .expect("expected reply segment");
     println!("  [SERVER] Sent {} bytes: \"{}\"", reply.len(), String::from_utf8_lossy(reply));
 
     let ack_reply = client
-        .on_segment(&reply_seg)
+        .on_segment(&reply_seg, t)
         .expect("client reply failed");
     if let Some(a) = ack_reply {
-        server.on_segment(&a).expect("server ack failed");
+        server.on_segment(&a, t).expect("server ack failed");
     }
 
     let mut client_buf = [0u8; 256];
@@ -91,18 +95,18 @@ fn main() {
 
     // ── Teardown ───────────────────────────────────────────────────
     println!("─── Connection Teardown ──────────────────────────────────");
-    let fin = client.close().expect("close failed");
+    let fin = client.close(t).expect("close failed");
     let ack_fin = server
-        .on_segment(&fin)
+        .on_segment(&fin, t)
         .expect("server FIN failed")
         .expect("expected ACK");
-    client.on_segment(&ack_fin).expect("ack failed");
-    let srv_fin = server.close().expect("server close failed");
+    client.on_segment(&ack_fin, t).expect("ack failed");
+    let srv_fin = server.close(t).expect("server close failed");
     let fack = client
-        .on_segment(&srv_fin)
+        .on_segment(&srv_fin, t)
         .expect("client FIN failed")
         .expect("expected final ACK");
-    server.on_segment(&fack).expect("final ack failed");
+    server.on_segment(&fack, t).expect("final ack failed");
     println!("  [SERVER] state: {} | [CLIENT] state: {}", server.state(), client.state());
     println!();
     println!("  ✓ Server example complete.");

@@ -31,6 +31,8 @@ pub enum NetError {
     ArpPending,
     /// The operation would block.
     WouldBlock,
+    /// The connection timed out (retransmission attempts exhausted).
+    TimedOut,
 }
 
 impl fmt::Display for NetError {
@@ -49,6 +51,7 @@ impl fmt::Display for NetError {
             NetError::NoRoute => write!(f, "no route to host"),
             NetError::ArpPending => write!(f, "ARP resolution pending"),
             NetError::WouldBlock => write!(f, "operation would block"),
+            NetError::TimedOut => write!(f, "connection timed out"),
         }
     }
 }

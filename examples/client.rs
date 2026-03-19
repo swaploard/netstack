@@ -5,6 +5,7 @@
 
 use netstack::socket::tcp_socket::TcpSocket;
 use netstack::socket::tcp::state::TcpState;
+use netstack::time::Instant;
 
 fn main() {
     println!("╔══════════════════════════════════════════════════════════╗");
@@ -12,12 +13,15 @@ fn main() {
     println!("╚══════════════════════════════════════════════════════════╝");
     println!();
 
+    let t = Instant::from_millis(0);
+
     // ── Connect to server ──────────────────────────────────────────
     println!("─── Connecting to 10.0.0.2:80 ──────────────────────────");
     let (mut client, syn_bytes) = TcpSocket::tcp_connect(
         [10, 0, 0, 1], 50000,
         [10, 0, 0, 2], 80,
         1000,
+        t,
     )
     .expect("connect failed");
     println!("  [CLIENT] SYN sent         | state: {}", client.state());
@@ -27,16 +31,16 @@ fn main() {
         .expect("server listen failed");
 
     let syn_ack_bytes = server
-        .accept(&syn_bytes, [10, 0, 0, 1], 50000, 2000)
+        .accept(&syn_bytes, [10, 0, 0, 1], 50000, 2000, t)
         .expect("server accept failed");
 
     let ack_bytes = client
-        .on_segment(&syn_ack_bytes)
+        .on_segment(&syn_ack_bytes, t)
         .expect("client SYN-ACK processing failed")
         .expect("expected ACK");
     println!("  [CLIENT] Connected        | state: {}", client.state());
 
-    server.on_segment(&ack_bytes).expect("server ACK failed");
+    server.on_segment(&ack_bytes, t).expect("server ACK failed");
 
     assert_eq!(client.state(), TcpState::Established);
     println!();
@@ -45,15 +49,15 @@ fn main() {
     println!("─── Sending Request ──────────────────────────────────────");
     let request = b"GET / HTTP/1.1\r\nHost: 10.0.0.2\r\n\r\n";
     let data_seg = client
-        .tcp_send(request)
+        .tcp_send(request, t)
         .expect("send failed")
         .expect("expected data segment");
     println!("  [CLIENT] Sent {} bytes", request.len());
 
     // Server receives and replies
-    let ack = server.on_segment(&data_seg).expect("server data failed");
+    let ack = server.on_segment(&data_seg, t).expect("server data failed");
     if let Some(a) = ack {
-        client.on_segment(&a).expect("client ack failed");
+        client.on_segment(&a, t).expect("client ack failed");
     }
     let mut recv_buf = [0u8; 512];
     let n = server.tcp_receive(&mut recv_buf).expect("server recv failed");
@@ -61,15 +65,15 @@ fn main() {
 
     let reply = b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!";
     let reply_seg = server
-        .tcp_send(reply)
+        .tcp_send(reply, t)
         .expect("server send failed")
         .expect("expected reply segment");
 
     let ack_reply = client
-        .on_segment(&reply_seg)
+        .on_segment(&reply_seg, t)
         .expect("client reply processing failed");
     if let Some(a) = ack_reply {
-        server.on_segment(&a).expect("server ack failed");
+        server.on_segment(&a, t).expect("server ack failed");
     }
 
     let mut client_recv = [0u8; 512];
@@ -79,18 +83,18 @@ fn main() {
 
     // ── Close connection ───────────────────────────────────────────
     println!("─── Closing Connection ───────────────────────────────────");
-    let fin_bytes = client.close().expect("close failed");
+    let fin_bytes = client.close(t).expect("close failed");
     let ack_for_fin = server
-        .on_segment(&fin_bytes)
+        .on_segment(&fin_bytes, t)
         .expect("server FIN failed")
         .expect("expected ACK");
-    client.on_segment(&ack_for_fin).expect("client ack failed");
-    let server_fin = server.close().expect("server close failed");
+    client.on_segment(&ack_for_fin, t).expect("client ack failed");
+    let server_fin = server.close(t).expect("server close failed");
     let final_ack = client
-        .on_segment(&server_fin)
+        .on_segment(&server_fin, t)
         .expect("client FIN failed")
         .expect("expected final ACK");
-    server.on_segment(&final_ack).expect("server final ack failed");
+    server.on_segment(&final_ack, t).expect("server final ack failed");
     println!("  [CLIENT] state: {}", client.state());
     println!("  [SERVER] state: {}", server.state());
     println!();
