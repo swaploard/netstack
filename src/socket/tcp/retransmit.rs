@@ -182,6 +182,11 @@ impl RetransmitQueue {
         self.entries.is_empty()
     }
 
+    /// Returns the first segment in the queue (for fast retransmit).
+    pub fn first_segment(&self) -> Option<TcpSegmentOut> {
+        self.entries.first().map(|entry| entry.segment.clone())
+    }
+
     /// Acknowledge all data up to `ack_num`.
     ///
     /// Removes fully-acknowledged entries and returns an RTT sample
