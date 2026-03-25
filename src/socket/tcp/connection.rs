@@ -318,7 +318,7 @@ impl TcpConnection {
                 // Fast Retransmit: trigger on 3 duplicate ACKs
                 if is_duplicate && self.congestion_control.should_fast_retransmit() {
                     fast_retransmit_needed = true;
-                    self.congestion_control.on_loss_detected();
+                    self.congestion_control.on_loss_detected(self.send_next);
                 }
             }
         }
